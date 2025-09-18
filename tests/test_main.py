@@ -1,65 +1,61 @@
-import sys
-import types
+import os
 import pytest
 
 import main
 
 
-class DummyBox:
-    def __init__(self, cls, conf):
-        self.cls = cls
-        self.conf = conf
+WEIGHTS = 'weights/best.pt'
+IMAGE = 'data/images/mspc-naip-lax-airport.png'
 
 
-class DummyResult:
-    def __init__(self, boxes):
-        self.boxes = boxes
+def _ensure_resources_available():
+    if not os.path.exists(WEIGHTS):
+        pytest.skip(f"Weights not available at {WEIGHTS}")
+    if not os.path.exists(IMAGE):
+        pytest.skip(f"Test image not available at {IMAGE}")
 
 
-class DummyModel:
-    def __init__(self, weights):
-        # expose names like the real model
-        self.names = {0: 'truck', 1: 'car'}
-        self.loaded_weights = weights
+def test_detections_produced():
+    """Verify that running inference with the real YOLO model produces at least one detection."""
+    _ensure_resources_available()
 
-    def __call__(self, image_path):
-        # Return a list with one DummyResult containing two boxes
-        return [
-            DummyResult([
-                DummyBox(0, 0.9234),
-                DummyBox(1, 0.4567),
-            ])
-        ]
+    detections = main.run_inference(weights=WEIGHTS, image_path=IMAGE, confidence_threshold=0.0)
+
+    assert isinstance(detections, list)
+    assert len(detections) > 0, "Expected at least one detection from the model"
 
 
-def test_run_inference_monkeypatched(monkeypatch, capsys):
-    # Replace the YOLO class in the main module with DummyModel
-    monkeypatch.setattr(main, 'YOLO', DummyModel)
+def test_output_arg_creates_annotated_image(tmp_path):
+    """Verify that the CLI `--output` argument writes an annotated image to disk."""
+    _ensure_resources_available()
 
-    detections = main.run_inference(weights='weights/mock.pt', image_path='images/mock.png')
+    out_path = tmp_path / 'annotated.png'
 
-    captured = capsys.readouterr()
-    stdout = captured.out.strip().splitlines()
-
-    assert any('Detected: truck (confidence: 0.923)' in line for line in stdout)
-    assert any('Detected: car (confidence: 0.457)' in line for line in stdout)
-
-    # Verify structured return value
-    assert len(detections) == 2
-    assert detections[0]['name'] == 'truck'
-    assert pytest.approx(detections[0]['confidence'], rel=1e-3) == 0.9234
-    assert detections[1]['name'] == 'car'
-
-
-def test_cli_entrypoint_parses_args(monkeypatch, capsys):
-    monkeypatch.setattr(main, 'YOLO', DummyModel)
-
-    # Simulate CLI invocation with custom args
-    ret = main.main(['--weights', 'weights/foo.pt', '--image', 'images/foo.png'])
-
-    # main() should return an int exit code
+    # Call the CLI entrypoint; it should save an annotated image if boxes contain coordinates
+    ret = main.main(['--weights', WEIGHTS, '--image', IMAGE, '--output', str(out_path)])
     assert ret == 0
 
-    captured = capsys.readouterr()
-    stdout = captured.out.strip()
-    assert 'Detected: truck (confidence: 0.923)' in stdout
+    assert out_path.exists(), "Annotated output file was not created"
+    assert out_path.stat().st_size > 0, "Annotated output file appears to be empty"
+
+
+def test_confidence_levels_produce_distinct_results():
+    """Verify that different confidence thresholds produce different numbers of detections."""
+    _ensure_resources_available()
+
+    low_thresh = 0.0
+    high_thresh = 0.9
+
+    low_dets = main.run_inference(weights=WEIGHTS, image_path=IMAGE, confidence_threshold=low_thresh)
+    high_dets = main.run_inference(weights=WEIGHTS, image_path=IMAGE, confidence_threshold=high_thresh)
+
+    low_count = len(low_dets)
+    high_count = len(high_dets)
+
+    # Sanity checks
+    assert low_count >= 0
+    assert high_count >= 0
+
+    # Expect stricter threshold to produce fewer (or equal) detections, but we require a difference
+    assert low_count >= high_count, "Lower threshold should not produce fewer detections than a higher threshold"
+    assert low_count != high_count, f"Expected different detection counts for thresholds {low_thresh} vs {high_thresh} (got {low_count} vs {high_count})"
