@@ -105,50 +105,51 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
         url_path = urllib.request.urlparse(input_path_or_url).path
         ext = os.path.splitext(url_path)[1].lower()
         is_tiff = ext in ('.tif', '.tiff')
-        if is_tiff:
-            # Try to stream into memory and open via MemoryFile
+
+        if force_download and temp_dir is None:
+            temp_dir = tempfile.mkdtemp(prefix='preproc_')  
+            # Download to temp_dir if force_download is set
+            local_filename = os.path.join(temp_dir, os.path.basename(url_path))
             try:
-                if requests is not None:
-                    resp = requests.get(input_path_or_url, timeout=15)
-                    resp.raise_for_status()
-                    with MemoryFile(resp.content) as mem:
-                        with mem.open() as ds:
-                            arr = ds.read()
-                else:
-                    with urllib.request.urlopen(input_path_or_url, timeout=15) as r:
-                        data = r.read()
-                        with MemoryFile(data) as mem:
-                            with mem.open() as ds:
-                                arr = ds.read()
-            except Exception:
-                # If direct streaming fails and force_download is False, raise
-                if not force_download:
-                    raise RuntimeError(f"Failed to read GeoTIFF from URL '{input_path_or_url}' directly into memory and --force-download not set.")
-                # else download to temporary file then open with rasterio
-                if temp_dir is None:
-                    temp_dir = tempfile.mkdtemp(prefix='preproc_')
-                local_filename = os.path.join(temp_dir, os.path.basename(url_path) or 'downloaded_image.tif')
+                #download the file
+                with requests.get(input_path_or_url, stream=True, timeout=15) as r:
+                    r.raise_for_status()
+                    with open(local_filename, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+            except Exception as e:
+                raise RuntimeError(f"Failed to download image from URL '{input_path_or_url}': {e}")
+            downloaded_path = local_filename
+
+        if is_tiff:
+            if force_download:
+                # Open from downloaded file
                 try:
-                    if requests is not None:
-                        with requests.get(input_path_or_url, stream=True, timeout=15) as r:
-                            r.raise_for_status()
-                            with open(local_filename, 'wb') as f:
-                                for chunk in r.iter_content(chunk_size=8192):
-                                    if chunk:
-                                        f.write(chunk)
-                    else:
-                        urllib.request.urlretrieve(input_path_or_url, local_filename)
-                    downloaded_path = local_filename
                     with rasterio.open(local_filename) as ds:
                         arr = ds.read()
                 except Exception as e:
-                    raise RuntimeError(f"Failed to download or open GeoTIFF URL '{input_path_or_url}': {e}")
+                    raise RuntimeError(f"Failed to open downloaded GeoTIFF '{local_filename}': {e}")
+            else:
+                # Try to open directly from the URL
+                try:
+                    with rasterio.open(input_path_or_url) as ds:
+                        arr = ds.read()
+                except Exception as e:
+                    raise RuntimeError(f"Failed to read GeoTIFF from URL '{input_path_or_url}': {e}")
+
+            
         else:
             # Non-tiff URL -> fallback to PIL-based loader which may stream into memory
-            try:
-                img, downloaded_path = _read_image_from_url(input_path_or_url, force_download=force_download)
-            except Exception as e:
-                raise RuntimeError(f"Failed to read image from URL '{input_path_or_url}': {e}")
+            if force_download:
+                try:
+                    img = Image.open(local_filename)
+                except Exception as e:
+                    raise RuntimeError(f"Failed to open downloaded image '{local_filename}': {e}") from e
+            else:
+                # Produce error; non-tiff URL without force_download is not supported
+                raise RuntimeError(f"Failed to read non-TIFF image from URL '{input_path_or_url}': force_download not set")
+            
     else:
         # local file
         if not os.path.exists(input_path_or_url):
@@ -167,6 +168,8 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
         if Image is None:
             raise RuntimeError('Pillow is required to open images')
         arr = np.array(img)
+        # delte img to free memory
+        del img
 
     # If rasterio produced an array, it will be in CHW ordering (bands, rows, cols). Convert to HWC
     if arr.ndim == 3 and arr.shape[2] not in (1, 3, 4) and arr.shape[0] in (1, 2, 3, 4):
@@ -178,7 +181,9 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
     # Handle band counts
     if arr.shape[2] == 1:
         # Single band: scale to 0-255 and replicate to 3 channels
-        band = arr[:, :, 0].astype(np.float64)
+        band = arr[:, :, 0].astype(np.int16)
+        # delete arr to free memory
+        del arr
         mn, mx = np.nanmin(band), np.nanmax(band)
         if mx == mn:
             # constant image
@@ -188,7 +193,9 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
         rgb = np.stack([scaled, scaled, scaled], axis=2)
     elif arr.shape[2] == 3 or arr.shape[2] == 4:
         # Use only first three bands for 4-band images
-        rgb = arr[:, :, :3].astype(np.float64)
+        rgb = arr[:, :, :3].astype(np.int16)
+        # delete arr to free memory
+        del arr
         # Rescale per-channel to 0-255 if needed (e.g., 16-bit input)
         out = np.zeros_like(rgb, dtype=np.uint8)
         for c in range(3):
