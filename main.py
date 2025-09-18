@@ -11,14 +11,15 @@ except Exception:
     ImageFont = None
 
 
-def run_inference(weights: str = 'weights/best.pt', image_path: str = 'data/images/mspc-naip-lax-airport.png', output_path: Optional[str] = None) -> List[Dict]:
+def run_inference(weights: str = 'weights/best.pt', image_path: str = 'data/images/mspc-naip-lax-airport.png', output_path: Optional[str] = None, confidence_threshold: float = 0.0) -> List[Dict]:
     """Load a YOLO model from `weights`, run inference on `image_path`,
     print detections, return a list of detection dicts for testing, and
     optionally save an annotated image to `output_path`.
     """
     model = YOLO(weights)
 
-    results = model(image_path)
+    # Let the model filter detections by passing the confidence threshold (conf)
+    results = model(image_path, conf=confidence_threshold)
 
     detections = []
 
@@ -30,6 +31,7 @@ def run_inference(weights: str = 'weights/best.pt', image_path: str = 'data/imag
         for box in boxes:
             class_id = int(box.cls)
             confidence = float(box.conf)
+
             name = model.names[class_id] if hasattr(model, 'names') else str(class_id)
             line = f"Detected: {name} (confidence: {confidence:.3f})"
             print(line)
@@ -93,12 +95,13 @@ def parse_args(argv=None):
     parser.add_argument('--weights', type=str, default='weights/best.pt', help='Path to model weights')
     parser.add_argument('--image', type=str, default='data/images/mspc-naip-lax-airport.png', help='Path to input image')
     parser.add_argument('--output', type=str, default=None, help='Optional path to save annotated image')
+    parser.add_argument('--conf-thres', '--threshold', '-t', type=float, dest='conf_thres', default=0.0, help='Confidence threshold: discard detections with confidence less than this value (default 0.0)')
     return parser.parse_args(argv)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    run_inference(weights=args.weights, image_path=args.image, output_path=args.output)
+    run_inference(weights=args.weights, image_path=args.image, output_path=args.output, confidence_threshold=args.conf_thres)
     return 0
 
 
