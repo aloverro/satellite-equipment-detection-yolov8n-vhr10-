@@ -6,18 +6,14 @@ import math
 import urllib.request
 from typing import List, Dict, Optional
 
-try:
-    from PIL import Image, ImageDraw, ImageFont
-except Exception:
-    Image = None
-    ImageDraw = None
-    ImageFont = None
+from PIL import Image, ImageDraw, ImageFont
 
 # Prefer requests if available for nicer handling, but fall back to urllib
-try:
-    import requests
-except Exception:
-    requests = None
+import requests
+
+import rasterio  # type: ignore
+from rasterio.io import MemoryFile  # type: ignore
+
 
 import numpy as np
 
@@ -104,37 +100,78 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
     downloaded_path = None
 
     # Load image either from local path or from url
+    # Detect GeoTIFF by file extension where possible and use rasterio when available
     if is_url(input_path_or_url):
-        # try to read directly, if fails and force_download is False, this will raise
-        try:
-            img, downloaded_path = _read_image_from_url(input_path_or_url, force_download=force_download)
-            if downloaded_path is not None:
-                temp_dir = os.path.dirname(downloaded_path)
-        except Exception as e:
-            raise RuntimeError(f"Failed to read image from URL '{input_path_or_url}': {e}")
+        url_path = urllib.request.urlparse(input_path_or_url).path
+        ext = os.path.splitext(url_path)[1].lower()
+        is_tiff = ext in ('.tif', '.tiff')
+        if is_tiff:
+            # Try to stream into memory and open via MemoryFile
+            try:
+                if requests is not None:
+                    resp = requests.get(input_path_or_url, timeout=15)
+                    resp.raise_for_status()
+                    with MemoryFile(resp.content) as mem:
+                        with mem.open() as ds:
+                            arr = ds.read()
+                else:
+                    with urllib.request.urlopen(input_path_or_url, timeout=15) as r:
+                        data = r.read()
+                        with MemoryFile(data) as mem:
+                            with mem.open() as ds:
+                                arr = ds.read()
+            except Exception:
+                # If direct streaming fails and force_download is False, raise
+                if not force_download:
+                    raise RuntimeError(f"Failed to read GeoTIFF from URL '{input_path_or_url}' directly into memory and --force-download not set.")
+                # else download to temporary file then open with rasterio
+                if temp_dir is None:
+                    temp_dir = tempfile.mkdtemp(prefix='preproc_')
+                local_filename = os.path.join(temp_dir, os.path.basename(url_path) or 'downloaded_image.tif')
+                try:
+                    if requests is not None:
+                        with requests.get(input_path_or_url, stream=True, timeout=15) as r:
+                            r.raise_for_status()
+                            with open(local_filename, 'wb') as f:
+                                for chunk in r.iter_content(chunk_size=8192):
+                                    if chunk:
+                                        f.write(chunk)
+                    else:
+                        urllib.request.urlretrieve(input_path_or_url, local_filename)
+                    downloaded_path = local_filename
+                    with rasterio.open(local_filename) as ds:
+                        arr = ds.read()
+                except Exception as e:
+                    raise RuntimeError(f"Failed to download or open GeoTIFF URL '{input_path_or_url}': {e}")
+        else:
+            # Non-tiff URL -> fallback to PIL-based loader which may stream into memory
+            try:
+                img, downloaded_path = _read_image_from_url(input_path_or_url, force_download=force_download)
+            except Exception as e:
+                raise RuntimeError(f"Failed to read image from URL '{input_path_or_url}': {e}")
     else:
         # local file
         if not os.path.exists(input_path_or_url):
             raise FileNotFoundError(f"Input image not found: {input_path_or_url}")
-        img = Image.open(input_path_or_url)
+        ext = os.path.splitext(input_path_or_url)[1].lower()
+        is_tiff = ext in ('.tif', '.tiff')
+        if is_tiff:
+            with rasterio.open(input_path_or_url) as ds:
+                arr = ds.read()
+        else:
+            img = Image.open(input_path_or_url)
 
-    # Ensure Pillow image loaded
-    if Image is None:
-        raise RuntimeError('Pillow is required to open images')
+    # At this point either `img` (Pillow Image) is defined, or `arr` (numpy from rasterio) is defined.
+    # Convert Pillow image to numpy when needed
+    if 'img' in locals():
+        if Image is None:
+            raise RuntimeError('Pillow is required to open images')
+        arr = np.array(img)
 
-    # Get band information
-    bands = img.getbands() if hasattr(img, 'getbands') else None
-    num_bands = len(bands) if bands is not None else 1
-
-    if num_bands > 4:
-        raise RuntimeError(f'Input image has {num_bands} bands which is more than supported (4). Preprocessor will not run on this image.')
-
-    # Convert to numpy for processing
-    arr = np.array(img)
-    # Normalize and ensure shape HWC
-    if arr.ndim == 2:
-        # Single-band (H, W) -> promote to (H, W, 1)
-        arr = arr[:, :, None]
+    # If rasterio produced an array, it will be in CHW ordering (bands, rows, cols). Convert to HWC
+    if arr.ndim == 3 and arr.shape[2] not in (1, 3, 4) and arr.shape[0] in (1, 2, 3, 4):
+        # assume CHW -> transpose
+        arr = np.transpose(arr, (1, 2, 0))
 
     h, w = arr.shape[0], arr.shape[1]
 
