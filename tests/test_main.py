@@ -6,6 +6,7 @@ import main
 
 WEIGHTS = 'weights/best.pt'
 IMAGE = 'data/images/mspc-naip-lax-airport.png'
+TIFF = 'https://naipeuwest.blob.core.windows.net/naip/v002/ca/2022/ca_060cm_2022/33118/m_3311823_nw_11_060_20220511.tif'
 
 
 def _ensure_resources_available():

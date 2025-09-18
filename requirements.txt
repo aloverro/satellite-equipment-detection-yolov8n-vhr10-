@@ -1,3 +1,12 @@
+# Use headless OpenCV build to avoid GUI/system library dependencies
+opencv-python-headless
+
 ultralytics
 pillow
 pytest
+
+# Added for GeoTIFF support and robust HTTP fetching
+rasterio
+requests
+numpy
+
