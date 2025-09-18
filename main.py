@@ -1,107 +1,63 @@
-from ultralytics import YOLO
+from typing import Optional
 import argparse
 import sys
-from typing import List, Dict, Optional
+import os
+import shutil
 
-try:
-    from PIL import Image, ImageDraw, ImageFont
-except Exception:
-    Image = None
-    ImageDraw = None
-    ImageFont = None
-
-
-def run_inference(weights: str = 'weights/best.pt', image_path: str = 'data/images/mspc-naip-lax-airport.png', output_path: Optional[str] = None, confidence_threshold: float = 0.0) -> List[Dict]:
-    """Load a YOLO model from `weights`, run inference on `image_path`,
-    print detections, return a list of detection dicts for testing, and
-    optionally save an annotated image to `output_path`.
-    """
-    model = YOLO(weights)
-
-    # Let the model filter detections by passing the confidence threshold (conf)
-    results = model(image_path, conf=confidence_threshold)
-
-    detections = []
-
-    # We'll collect drawable boxes if coordinates are available
-    drawable_boxes = []  # list of (xyxy_tuple, label_string)
-
-    for result in results:
-        boxes = result.boxes
-        for box in boxes:
-            class_id = int(box.cls)
-            confidence = float(box.conf)
-
-            name = model.names[class_id] if hasattr(model, 'names') else str(class_id)
-            line = f"Detected: {name} (confidence: {confidence:.3f})"
-            print(line)
-            detections.append({"name": name, "confidence": confidence})
-
-            # Try to extract xyxy coordinates if available for annotation
-            xyxy = None
-            if hasattr(box, 'xyxy'):
-                try:
-                    coords = box.xyxy
-                    # If tensor or numpy array, try to convert to Python list
-                    if hasattr(coords, 'tolist'):
-                        coords = coords.tolist()
-                    # coords may be nested like [[x1,y1,x2,y2]]
-                    if isinstance(coords, (list, tuple)):
-                        if len(coords) == 4 and all(isinstance(v, (int, float)) for v in coords):
-                            xyxy = tuple(map(float, coords))
-                        elif len(coords) >= 1 and isinstance(coords[0], (list, tuple)) and len(coords[0]) == 4:
-                            xyxy = tuple(map(float, coords[0]))
-                except Exception:
-                    xyxy = None
-
-            if xyxy is not None:
-                drawable_boxes.append((xyxy, f"{name} {confidence:.2f}"))
-
-    # If requested, try to annotate and save the image using Pillow
-    if output_path is not None:
-        if Image is None or ImageDraw is None:
-            print("Pillow not installed; cannot save annotated image. Install pillow to enable this feature.")
-        else:
-            try:
-                img = Image.open(image_path).convert('RGB')
-                draw = ImageDraw.Draw(img)
-                # optional font; fall back to default
-                try:
-                    font = ImageFont.load_default()
-                except Exception:
-                    font = None
-
-                for xyxy, label in drawable_boxes:
-                    x1, y1, x2, y2 = map(int, xyxy)
-                    # draw rectangle
-                    draw.rectangle([x1, y1, x2, y2], outline='red', width=3)
-                    # draw label background
-                    text_size = draw.textsize(label, font=font) if hasattr(draw, 'textsize') else (0, 0)
-                    text_bg = [x1, max(y1 - text_size[1] - 4, 0), x1 + text_size[0] + 4, y1]
-                    draw.rectangle(text_bg, fill='red')
-                    # draw label text
-                    draw.text((x1 + 2, max(y1 - text_size[1] - 3, 0)), label, fill='white', font=font)
-
-                img.save(output_path)
-                print(f"Annotated image saved to {output_path}")
-            except Exception as e:
-                print(f"Failed to save annotated image: {e}")
-
-    return detections
+# Import the refactored modules
+from inference import run as run_inference
+import processors
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description='Run YOLO inference on a single image.')
     parser.add_argument('--weights', type=str, default='weights/best.pt', help='Path to model weights')
-    parser.add_argument('--image', type=str, default='data/images/mspc-naip-lax-airport.png', help='Path to input image')
-    parser.add_argument('--output', type=str, default=None, help='Optional path to save annotated image')
-    parser.add_argument('--conf-thres', '--threshold', '-t', type=float, dest='conf_thres', default=0.0, help='Confidence threshold: discard detections with confidence less than this value (default 0.0)')
+    parser.add_argument('--image', type=str, default='data/images/mspc-naip-lax-airport.png', help='Path to input image or URL')
+    parser.add_argument('--output', type=str, default=None, help='Optional path to save annotated image (full-size annotation will be done by post-processor)')
+    parser.add_argument('--confidence', '--threshold', '-t', type=float, dest='confidence', default=0.0, help='Confidence threshold: discard detections with confidence less than this value (default 0.0)')
+    parser.add_argument('--force-download', action='store_true', help='Force download of image when input is a URL (store in a temporary folder)')
+    parser.add_argument('--max-side-size', type=int, default=512, help='Maximum side size (pixels) for chips produced by the preprocessor (default 512)')
+    parser.add_argument('--annotate-chips', action='store_true', help='(Optional) annotate individual chips as they are processed; defaults to False. Full-size annotation is performed by post-processor.')
     return parser.parse_args(argv)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    run_inference(weights=args.weights, image_path=args.image, output_path=args.output, confidence_threshold=args.conf_thres)
+
+    # Run preprocessor
+    try:
+        pre = processors.preprocess_image(args.image, max_side_size=args.max_side_size, force_download=args.force_download)
+    except Exception as e:
+        print(f"Preprocessing failed: {e}")
+        return 2
+
+    chips = pre['chips']
+    chip_boxes = pre['chip_boxes']
+    temp_dir = pre.get('temp_dir')
+
+    all_detections = []
+
+    # Run inference sequentially on each chip
+    for idx, chip in enumerate(chips):
+        print(f"Processing chip {idx + 1}/{len(chips)} at original position {chip_boxes[idx]}")
+        detections = run_inference(weights=args.weights, image_input=chip, confidence_threshold=args.confidence)
+        for det in detections:
+            det['_chip_index'] = idx
+            det['_chip_box'] = chip_boxes[idx]
+        all_detections.extend(detections)
+
+    # Post-process detections: aggregate, NMS, annotate full image, optionally annotate chips
+    aggregated = processors.postprocess_detections(all_detections, chips, chip_boxes, pre['original_size'], pre['padded_size'], annotate_chips=args.annotate_chips, output_path=args.output)
+    print(f"Post-processed detections (after NMS): {len(aggregated)} entries")
+
+    # Clean up temporary directory if images were downloaded
+    if temp_dir is not None and os.path.isdir(temp_dir):
+        try:
+            shutil.rmtree(temp_dir)
+            print(f"Cleaned up temporary directory: {temp_dir}")
+        except Exception as e:
+            print(f"Failed to clean up temporary directory {temp_dir}: {e}")
+
     return 0
 
 
