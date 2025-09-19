@@ -17,6 +17,7 @@ def parse_args(argv=None):
     parser.add_argument('--confidence', '--threshold', '-t', type=float, dest='confidence', default=0.0, help='Confidence threshold: discard detections with confidence less than this value (default 0.0)')
     parser.add_argument('--force-download', action='store_true', help='Force download of image when input is a URL (store in a temporary folder)')
     parser.add_argument('--max-side-size', type=int, default=512, help='Maximum side size (pixels) for chips produced by the preprocessor (default 512)')
+    parser.add_argument('--downsample-factor', '-d', type=int, dest='downsample_factor', default=1.0, help='Factor to downsample the image before processing (default 1.0 = no downsampling)')
     parser.add_argument('--annotate-chips', action='store_true', help='(Optional) annotate individual chips as they are processed; defaults to False. Full-size annotation is performed by post-processor.')
     return parser.parse_args(argv)
 
@@ -26,7 +27,7 @@ def main(argv=None) -> int:
 
     # Run preprocessor
     try:
-        pre = processors.preprocess_image(args.image, max_side_size=args.max_side_size, force_download=args.force_download)
+        pre = processors.preprocess_image(args.image, max_side_size=args.max_side_size, force_download=args.force_download, downsample_factor=args.downsample_factor)
     except Exception as e:
         print(f"Preprocessing failed: {e}")
         return 2

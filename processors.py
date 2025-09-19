@@ -85,7 +85,7 @@ def _read_image_from_url(url: str, force_download: bool = False, temp_dir: Optio
         raise
 
 
-def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_download: bool = False):
+def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_download: bool = False, downsample_factor: float = 1.0):
     """Preprocess an input image (local path or URL) and return a dict containing:
        - chips: list of numpy uint8 arrays (H, W, 3) of equal size
        - chip_boxes: list of (x_min,y_min,x_max,y_max) in ORIGINAL image pixel coordinates
@@ -93,8 +93,15 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
        - padded_size: (padded_width, padded_height)
        - temp_dir: path to temporary dir if a download occurred (caller should clean up)
 
+    Args:
+        input_path_or_url: Path to local image file or URL to download
+        max_side_size: Maximum dimension for chips (default 512)
+        force_download: Force download for URLs instead of streaming (default False)
+        downsample_factor: Factor to downsample image before processing (default 1.0 = no downsampling)
+
     The function ensures the returned chips are 8-bit RGB images and does not attempt
-    to process images with more than 4 bands.
+    to process images with more than 4 bands. If downsample_factor > 1.0, the image
+    is downsampled before chipping, which can reduce memory usage and processing time.
     """
     temp_dir = None
     downloaded_path = None
@@ -177,9 +184,19 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
         arr = np.transpose(arr, (1, 2, 0))
 
     h, w = arr.shape[0], arr.shape[1]
+    nbands = arr.shape[2]
+
+    if nbands > 4:
+        raise RuntimeError(f'Unexpected image array shape encountered: {arr.shape}; more than 4 bands not supported')
+
+    if downsample_factor is not None and downsample_factor > 1:
+        new_w = max(1, int(w / downsample_factor))
+        new_h = max(1, int(h / downsample_factor))
+        arr = np.array(Image.fromarray(arr).resize((new_w, new_h, nbands), resample=Image.BILINEAR))
+        w, h = new_w, new_h
 
     # Handle band counts
-    if arr.shape[2] == 1:
+    if nbands == 1:
         # Single band: scale to 0-255 and replicate to 3 channels
         band = arr[:, :, 0].astype(np.int16)
         # delete arr to free memory
@@ -191,7 +208,7 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
         else:
             scaled = ((band - mn) / (mx - mn) * 255.0).clip(0, 255).astype(np.uint8)
         rgb = np.stack([scaled, scaled, scaled], axis=2)
-    elif arr.shape[2] == 3 or arr.shape[2] == 4:
+    elif nbands == 3 or nbands == 4:
         # Use only first three bands for 4-band images
         rgb = arr[:, :, :3].astype(np.int16)
         # delete arr to free memory
