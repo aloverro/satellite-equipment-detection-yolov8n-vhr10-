@@ -1,4 +1,4 @@
-"""FastMCP server for Intelligence Agent"""
+"""FastMCP server for Object Detection"""
 import os
 import logging
 from mcp.server.fastmcp import FastMCP  # Base import (just for type hints)
@@ -27,7 +27,7 @@ def create_server() -> FastMCP:
     debug_enabled = os.getenv("DEBUG", "true").lower() != "false"
     
     mcp = APIKeyFastMCP(
-        "intelligence-agent-mcp",
+        "object-detection-mcp",
         stateless_http=True,
         json_response=True,
         host=host,  # Configure host for Docker compatibility

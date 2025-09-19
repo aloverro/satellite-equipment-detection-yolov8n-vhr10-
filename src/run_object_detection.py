@@ -5,8 +5,8 @@ import os
 import shutil
 
 # Local package imports (after restructure)
-from .inference import run as run_inference
-from . import processors
+from inference import run as run_inference
+import processors
 
 
 def parse_args(argv=None):

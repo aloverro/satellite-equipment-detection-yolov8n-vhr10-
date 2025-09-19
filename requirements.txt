@@ -60,6 +60,7 @@ azure-identity==1.25.0
 # Misc utilities
 six==1.17.0
 packaging==25.0
+typing==3.7.4.3
 
 # MCP tooling
 mcp==1.14.0

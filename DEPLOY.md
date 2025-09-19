@@ -6,13 +6,13 @@
 ```bash
 # Build the image
 # Option 1: If you're buildling locally only, or building on an AMD64 machine
-docker build -t intel-agent-mcp -f agent_team/Dockerfile agent_team
+docker build -t object-detection-mcp -f agent_team/Dockerfile agent_team
 
 # Option 2: If you're building on an ARM64 and need to move to the cloud:
-az acr build --registry mpcprohackathon --image intel-agent-mcp:latest --platform linux/amd64 -f agent_team/Dockerfile agent_team
+az acr build --registry mpcprohackathon --image object-detection-mcp:latest --platform linux/amd64 -f agent_team/Dockerfile agent_team
 
 # Tag for Azure Container Registry
-docker tag intel-agent-mcp mpcprohackathon.azurecr.io/intel-agent-mcp:latest
+docker tag object-detection-mcp mpcprohackathon.azurecr.io/object-detection-mcp:latest
 
 # Login to Azure first
 az login
@@ -21,7 +21,7 @@ az login
 az acr login --name mpcprohackathon
 
 # Push to registry
-docker push mpcprohackathon.azurecr.io/intel-agent-mcp:latest
+docker push mpcprohackathon.azurecr.io/object-detection-mcp:latest
 ```
 
 ### 2. Create Azure App Service
@@ -35,10 +35,10 @@ az appservice plan create \
 
 # Create App Service
 az webapp create \
-  --name intel-agent-mcp-server \
+  --name object-detection-mcp-server \
   --resource-group hackathon-2025 \
   --plan geocatalog-plan \
-  --deployment-container-image-name mpcprohackathon.azurecr.io/intel-agent-mcp:latest
+  --deployment-container-image-name mpcprohackathon.azurecr.io/object-detection-mcp:latest
 ```
 
 ### 3. Configure Environment Variables
@@ -57,7 +57,7 @@ Copy one of the passwords displayed above and replace [YOUR_PASSWORD] below.
 ```bash
 # Set required environment variables
 az webapp config appsettings set \
-  --name intel-agent-mcp-server \
+  --name object-detection-mcp-server \
   --resource-group hackathon-2025 \
   --settings \
     WEBSITES_PORT=8000 \
@@ -72,7 +72,7 @@ az webapp config appsettings set \
 
 ### 4. Watch the logs to see if the app got deployed correctly
 ```bash
-az webapp log tail --name intel-agent-mcp-server --resource-group hackathon-2025
+az webapp log tail --name object-detection-mcp-server --resource-group hackathon-2025
 ```
 
 **⚠️ IMPORTANT**: 
@@ -80,16 +80,16 @@ az webapp log tail --name intel-agent-mcp-server --resource-group hackathon-2025
 - **Save the generated API key** - you'll need to share it with the team!
 
 ### 5. Your API Endpoints Will Be:
-- **Health Check**: `https://intel-agent-mcp-server.azurewebsites.net/health`
-- **MCP Endpoint**: `https://intel-agent-mcp-server.azurewebsites.net/mcp`
-- **API Docs**: `https://intel-agent-mcp-server.azurewebsites.net/docs`
+- **Health Check**: `https://object-detection-mcp-server.azurewebsites.net/health`
+- **MCP Endpoint**: `https://object-detection-mcp-server.azurewebsites.net/mcp`
+- **API Docs**: `https://object-detection-mcp-server.azurewebsites.net/docs`
 
 ## Team Authentication Setup
 
 Share this with the team:
 ```
 API Key: [the key generated above]
-MCP Endpoint: https://intel-agent-mcp-server.azurewebsites.net/mcp
+MCP Endpoint: https://object-detection-mcp-server.azurewebsites.net/mcp
 Authorization: Bearer [the key generated above]
 ```
 

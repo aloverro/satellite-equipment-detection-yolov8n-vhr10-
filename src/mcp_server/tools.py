@@ -1,17 +1,20 @@
 """
-MCP tools for Microsoft Planetary Computer STAC API access.
+MCP tools for Object Detection.
 """
 
-import asyncio
 import logging
 import os, sys
 from pathlib import Path
-from typing import Optional
-from mcp.server.fastmcp import FastMCP
-sys.path.append(str(Path(__file__).parent.parent))
-from agents.factory import AgentFactory
+from typing import Optional, Annotated, Literal
+from pydantic import Field
 
-from .data_models.output import IntelligenceAgentChatOutput
+from mcp.server.fastmcp import FastMCP
+
+from src.inference import run as run_inference
+import src.processors
+import shutil
+
+from .data_models.output import DetectObjectsOutput
 
 logger = logging.getLogger(__name__)
 
@@ -36,80 +39,87 @@ def register_tools(mcp: FastMCP) -> None:
     # Validate authentication setup
     validate_auth()
     
-
     @mcp.tool(
-        description="""Engage in a conversational chat with the Intelligence Agent.
+        description="""Detect objects in satellite imagery using a YOLOv8 model.
+
+        This tool allows you to analyze satellite images to identify and locate objects of interest.
+        This tool is particularly useful for detecing airplanes, and ships.
+
+        Use this tool if you are looking to measure the level of activity at a location as measured by
+        the presence of airplanes at an airport, or ships at sea or in port. 
         
-        This tool allows you to interact with the Intelligence Agent, an AI-powered assistant 
-        designed to help analyze satellite imagery data in response to user-posed ingelligence questions.  
-        The Intelligence agent is designed to answer questions regarding the level and type of activity at one or more 
-        geographic locations around the world. It can also analyze how activity levels change over time, or how
-        the activity level compares between two or more locations. The agent is able to assess activity at a location by
-        searching for relevant satellite imagery, passes that imagery through one or more AI detection models, and directly
-        measaures the number, location, and type of objects in a scene. The agent leverages advanced natural language processing 
-        capabilities to understand and respond to your queries in a conversational manner.
-        
-        Use this tool when you need to:
-        - Determine availability of satellite imagery for specific locations or time periods
-        - Understand the types, or level of activities occurring at a location
-        - Understand how activity level changes over time at a location
-        - Understand how the activity level compares between two or more locations
-        
-        Simply provide your question as input, and the Intelligence Agent will respond accordingly."""
-    )
-    async def intelligence_agent_chat(
-        question: str
-    ) -> IntelligenceAgentChatOutput:
+        Provide this tool with the signed URL of the satellite image you wish to analyze, and the object type
+        you wish to search for. The only acceptable object types are 'airplane' or 'ship'.
+
+        The output of this model is metadata that includes a mapping between object type and the number of objects found.
+        """)
+    def detect_objects(
+        url: Annotated[str, Field(description="The signed URL of the image to analyze")],
+        object_type: Annotated[str, Field(description="The label for the object types to analyze")]
+    ) -> DetectObjectsOutput:
         """
-        Engage in a chat with the Intelligence Agent.
-        
-        Args:
-            question: User's question or prompt
-            
-        Returns:
-            IntelligenceAgentChatOutput containing the agent's response to your question.
+        Detect objects in satellite imagery 
         """
 
+
+
+        WEIGHTS = 'weights/best.pt'
+
+        ACCEPTED_OBJECT_TYPES = ['airplane', 'ship']
+
+        if object_type not in ACCEPTED_OBJECT_TYPES:
+            raise ValueError(f"Invalid object_type '{object_type}'. Must be one of {ACCEPTED_OBJECT_TYPES}")
+
+        # Update settings based on object type:
+        downsample_factor = 6 if object_type == 'ship' else 2 #6 for ship, 2 for airplanes
+
+        # Run preprocessor
         try:
-            # Local import to avoid potential circular imports at module import time
-            # from agents.factory import AgentFactory
+            pre = processors.preprocess_image(url, max_side_size=512, force_download=False, downsample_factor=downsample_factor)
+        except Exception as e:
+            logger.error(f"Preprocessing failed: {e}")
+            raise RuntimeError(f"Preprocessing failed: {e}") from e
 
-            agent_factory = AgentFactory()
+        chips = pre['chips']
+        chip_boxes = pre['chip_boxes']
+        temp_dir = pre.get('temp_dir')
 
-            # Await the async factory method to create the agent
-            intelligence_agent = await agent_factory.create_intelligence_analysis_agent()
+        all_detections = []
 
-        except Exception:
-            logger.exception("Error creating intelligence analysis agent")
-            print("Error creating intelligence analysis agent"
-                  " - returning placeholder response")
-            # Fallback to a simple placeholder response on error
-            response = f"Received your question: '{question}'. The Intelligence Agent is still under development."
+        # Run inference sequentially on each chip
+        for idx, chip in enumerate(chips):
+            logger.info(f"Processing chip {idx + 1}/{len(chips)} at original position {chip_boxes[idx]}")
+            detections = run_inference(weights=WEIGHTS, image_input=chip, confidence_threshold=0.0)
+            for det in detections:
+                det['_chip_index'] = idx
+                det['_chip_box'] = chip_boxes[idx]
+            all_detections.extend(detections)
 
-            return IntelligenceAgentChatOutput(response=response)
+        # Post-process detections: aggregate, NMS
+        aggregated = processors.postprocess_detections(
+            all_detections, chips, chip_boxes, pre['original_size'], pre['padded_size'], annotate_chips=False, output_path=None
+        )
+        logger.info(f"Post-processed detections (after NMS): {len(aggregated)} entries")
+
+        # Count objects by type
+        num_objects = 0
+        for det in aggregated:
+            label = det.get('name')
+            if label in object_type:
+                num_objects += 1
+        found_objects = {object_type: num_objects}
+        logger.info(f"Detected objects: {found_objects}")
         
-        try:
-            # Run the agent using its streaming API and collect all streamed chunks until
-            # completion, then return the assembled final text.
-            result = await intelligence_agent.run(task=question)
+        # Clean up temporary directory if images were downloaded
+        if temp_dir is not None and os.path.isdir(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+                logger.info(f"Cleaned up temporary directory: {temp_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
 
-        except Exception:
-            logger.exception("Error running intelligence agent chat")
-            print("Error running intelligence agent chat"
-                  " - returning placeholder response")
-            # Fallback to the simple placeholder response on error
-            response = f"Received your question: '{question}'. The Intelligence Agent is still under development."
-            return IntelligenceAgentChatOutput(response=response)    
+        return DetectObjectsOutput(found_objects=found_objects)
 
-        # Extract final response text from the agent's result
-        final_message = result.messages[-1]
-        if final_message.source == "Intelligence_Analysis_Agent":
-            final_response = final_message.content
-        else:
-            final_response = f"Received your question: '{question}'. The Intelligence Agent did not produce a textual response."
 
-        print("Final response from Intelligence Agent:", final_response)
-
-        return IntelligenceAgentChatOutput(response=final_response)
 
         

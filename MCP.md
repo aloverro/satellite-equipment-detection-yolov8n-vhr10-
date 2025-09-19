@@ -14,8 +14,8 @@ src/
 ## Get Started (Local Development)
 1. Install dependencies:
 ```bash
-  mamba create -n intel-agent-mcp python=3.12
-  mamba activate intel-agent-mcp
+  mamba create -n object-detection-mcp python=3.12
+  mamba activate object-detection-mcp
   pip install -r requirements.txt
 ```
 2. Run the server: `python main.py`
@@ -27,8 +27,8 @@ src/
 You can also build and run the MCP server in a Docker container (this mirrors what will run in Azure App Service for Containers):
 
 ```bash
-docker build -t intel-agent-mcp:local .
-docker run -p 8000:8000 -e ENV=local intel-agent-mcp:local
+docker build -t object-detection-mcp:local .
+docker run -p 8000:8000 -e ENV=local object-detection-mcp:local
 ```
 
 Then point your client to: http://localhost:8000/mcp
