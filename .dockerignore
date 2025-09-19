@@ -1,0 +1,35 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+*.coverage
+.coverage*
+.cache/
+
+# Distribution / packaging
+build/
+dist/
+.eggs/
+*.egg-info/
+
+# Virtual environments
+.venv/
+.env
+env/
+venv/
+
+# VCS
+.git
+.gitignore
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+
+# Logs & temp
+*.log
+logs/
+.tmp/
