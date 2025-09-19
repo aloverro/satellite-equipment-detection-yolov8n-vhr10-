@@ -11,7 +11,7 @@ from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from src.inference import run as run_inference
-import src.processors
+from src import processors
 import shutil
 
 from .data_models.output import DetectObjectsOutput
