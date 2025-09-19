@@ -1,7 +1,11 @@
 import os
 import pytest
+import sys
+from pathlib import Path
 
-import main
+# set the path to one folder level above this file's location
+sys.path.append(str(Path(__file__).parent.parent))
+import src.run_object_detection as run_object_detection
 
 
 WEIGHTS = 'weights/best.pt'
@@ -20,7 +24,7 @@ def test_detections_produced():
     """Verify that running inference with the real YOLO model produces at least one detection."""
     _ensure_resources_available()
 
-    detections = main.run_inference(weights=WEIGHTS, image_path=IMAGE, confidence_threshold=0.0)
+    detections = run_object_detection.run_inference(weights=WEIGHTS, image_path=IMAGE, confidence_threshold=0.0)
 
     assert isinstance(detections, list)
     assert len(detections) > 0, "Expected at least one detection from the model"
@@ -33,7 +37,7 @@ def test_output_arg_creates_annotated_image(tmp_path):
     out_path = tmp_path / 'annotated.png'
 
     # Call the CLI entrypoint; it should save an annotated image if boxes contain coordinates
-    ret = main.main(['--weights', WEIGHTS, '--image', IMAGE, '--output', str(out_path)])
+    ret = run_object_detection.main(['--weights', WEIGHTS, '--image', IMAGE, '--output', str(out_path)])
     assert ret == 0
 
     assert out_path.exists(), "Annotated output file was not created"
@@ -47,8 +51,8 @@ def test_confidence_levels_produce_distinct_results():
     low_thresh = 0.0
     high_thresh = 0.9
 
-    low_dets = main.run_inference(weights=WEIGHTS, image_path=IMAGE, confidence_threshold=low_thresh)
-    high_dets = main.run_inference(weights=WEIGHTS, image_path=IMAGE, confidence_threshold=high_thresh)
+    low_dets = run_object_detection.run_inference(weights=WEIGHTS, image_path=IMAGE, confidence_threshold=low_thresh)
+    high_dets = run_object_detection.run_inference(weights=WEIGHTS, image_path=IMAGE, confidence_threshold=high_thresh)
 
     low_count = len(low_dets)
     high_count = len(high_dets)

@@ -2,64 +2,48 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python: pytest",
-      "type": "python",
+      "name": "Run Object Detection (local PNG)",
+  "type": "debugpy",
       "request": "launch",
-      "module": "pytest",
-      "args": ["-q"],
-      "justMyCode": true
-    },
-    {
-      "name": "Python: Run current test file with pytest",
-      "type": "python",
-      "request": "launch",
-      "module": "pytest",
-      "args": ["-q", "${file}"],
-      "justMyCode": true
-    },
-    {
-      "name": "Python: Debug main.py (geotiff)",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/main.py",
-      "console": "integratedTerminal",
-      "args": [
-        "--weights", "weights/best.pt",
-        "--image", "https://naipeuwest.blob.core.windows.net/naip/v002/ca/2022/ca_060cm_2022/33118/m_3311823_nw_11_060_20220511.tif",
-        "--confidence", "0.2",
-        "-d","5"
-      ],
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "PYTHONUNBUFFERED": "1"
-      },
-      "justMyCode": true
-    },
-    {
-      "name": "Python: Debug main.py (png)",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/main.py",
+      "program": "${workspaceFolder}/src/run_object_detection.py",
       "console": "integratedTerminal",
       "args": [
         "--weights", "weights/best.pt",
         "--image", "data/images/mspc-naip-lax-airport.png",
         "--confidence", "0.2"
       ],
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "PYTHONUNBUFFERED": "1"
-      },
       "justMyCode": true
     },
     {
-      "name": "Python: Debug main.py (Attach Remote)",
-      "type": "python",
-      "request": "attach",
-      "connect": {
-        "host": "localhost",
-        "port": 5678
-      }
+      "name": "Run Object Detection (GeoTIFF URL)",
+  "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/run_object_detection.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--weights", "weights/best.pt",
+        "--image", "https://naipeuwest.blob.core.windows.net/naip/v002/ca/2022/ca_060cm_2022/33118/m_3311823_nw_11_060_20220511.tif",
+        "--confidence", "0.2",
+        "--force-download",
+        "-d", "5"
+      ],
+      "justMyCode": true
+    },
+    {
+      "name": "Python: pytest (all)",
+  "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-q"],
+      "justMyCode": true
+    },
+    {
+      "name": "Python: pytest current file",
+  "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-q", "${file}"],
+      "justMyCode": true
     }
   ]
 }

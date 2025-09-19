@@ -111,6 +111,26 @@ for result in results:
         confidence = float(box.conf)
         print(f"Detected: {model.names[class_id]} (confidence: {confidence:.3f})")
 ```
+### Command Line Inference (Project Script)
+
+After cloning the repository and installing requirements:
+
+```bash
+python -m src.run_object_detection --weights weights/best.pt --image data/images/mspc-naip-lax-airport.png --output annotated.png --confidence 0.25
+```
+
+Key arguments:
+- `--weights`: path to the YOLO weights (default `weights/best.pt`)
+- `--image`: local path or URL (GeoTIFF requires `--force-download` for remote reading)
+- `--output`: optional path to save a fully annotated image
+- `--confidence` / `--threshold`: confidence threshold filter
+- `--force-download`: force download when the image is a URL (required for non-TIFF URLs)
+- `--max-side-size`: maximum chip side length for tiling large images (default 512)
+- `--downsample-factor`: integer factor to downsample before chipping (e.g. 4, 8) to speed up inference
+- `--annotate-chips`: also output per-chip annotated PNGs
+
+You can also launch via VS Code using the provided debug configurations in `.vscode/launch.json`.
+
 
 ### HuggingFace Usage
 
