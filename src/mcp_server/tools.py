@@ -89,7 +89,7 @@ def register_tools(mcp: FastMCP) -> None:
         # Run inference sequentially on each chip
         for idx, chip in enumerate(chips):
             logger.info(f"Processing chip {idx + 1}/{len(chips)} at original position {chip_boxes[idx]}")
-            detections = run_inference(weights=WEIGHTS, image_input=chip, confidence_threshold=0.0)
+            detections = run_inference(weights=WEIGHTS, image_input=chip, confidence_threshold=0.2)
             for det in detections:
                 det['_chip_index'] = idx
                 det['_chip_box'] = chip_boxes[idx]
