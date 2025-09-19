@@ -192,7 +192,12 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
     if downsample_factor is not None and downsample_factor > 1:
         new_w = max(1, int(w / downsample_factor))
         new_h = max(1, int(h / downsample_factor))
-        arr = np.array(Image.fromarray(arr).resize((new_w, new_h, nbands), resample=Image.BILINEAR))
+        arr_full = arr.copy()
+        arr = np.zeros((new_h, new_w, nbands), dtype=arr.dtype)
+        # Use PIL for resizing with bilinear resampling
+        for band in range(nbands):
+            arr[:,:,band] = np.array(Image.fromarray(arr_full[:,:,band]).resize((new_w, new_h), resample=Image.BILINEAR))
+        
         w, h = new_w, new_h
 
     # Handle band counts
