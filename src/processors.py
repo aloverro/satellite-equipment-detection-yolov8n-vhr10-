@@ -13,6 +13,7 @@ import requests
 
 import rasterio  # type: ignore
 from rasterio.io import MemoryFile  # type: ignore
+from rasterio.warp import transform_bounds  # type: ignore
 
 
 import numpy as np
@@ -22,70 +23,10 @@ def is_url(path: str) -> bool:
     return isinstance(path, str) and (path.startswith('http://') or path.startswith('https://'))
 
 
-def _open_image_bytes(bytes_data: bytes):
-    if Image is None:
-        raise RuntimeError('Pillow is required to open images')
-    return Image.open(io.BytesIO(bytes_data))
+    # Removed unused helper functions _open_image_bytes and _read_image_from_url (previously handled URL streaming)
 
 
-def _read_image_from_url(url: str, force_download: bool = False, temp_dir: Optional[str] = None):
-    """Attempt to read an image directly from a URL into memory.
-
-    If that fails and force_download is True, download the image into temp_dir
-    and return the local path. Otherwise raise an exception.
-    Returns a tuple (PIL.Image or None, downloaded_file_path or None)
-    """
-    # First, try to stream into memory
-    try:
-        if requests is not None:
-            resp = requests.get(url, timeout=15)
-            resp.raise_for_status()
-            img = _open_image_bytes(resp.content)
-            return img, None
-        else:
-            # urllib
-            with urllib.request.urlopen(url, timeout=15) as r:
-                data = r.read()
-                img = _open_image_bytes(data)
-                return img, None
-    except Exception:
-        # Could not read directly from URL into memory
-        if not force_download:
-            raise
-
-    # If here, direct read failed and force_download is True -> attempt download to temp_dir
-    if temp_dir is None:
-        temp_dir = tempfile.mkdtemp(prefix='preproc_')
-    else:
-        os.makedirs(temp_dir, exist_ok=True)
-
-    local_filename = os.path.join(temp_dir, os.path.basename(urllib.request.urlparse(url).path) or 'downloaded_image')
-    try:
-        if requests is not None:
-            with requests.get(url, stream=True, timeout=15) as r:
-                r.raise_for_status()
-                with open(local_filename, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-        else:
-            urllib.request.urlretrieve(url, local_filename)
-        # Try opening the file from disk
-        if Image is None:
-            raise RuntimeError('Pillow is required to open images')
-        img = Image.open(local_filename)
-        return img, local_filename
-    except Exception:
-        # Clean up downloaded file if something went wrong
-        try:
-            if os.path.exists(local_filename):
-                os.remove(local_filename)
-        except Exception:
-            pass
-        raise
-
-
-def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_download: bool = False, downsample_factor: float = 1.0):
+def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_download: bool = False, downsample_factor: float = 1.0, bbox: Optional[List[float]] = None) -> Dict:
     """Preprocess an input image (local path or URL) and return a dict containing:
        - chips: list of numpy uint8 arrays (H, W, 3) of equal size
        - chip_boxes: list of (x_min,y_min,x_max,y_max) in ORIGINAL image pixel coordinates
@@ -98,6 +39,7 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
         max_side_size: Maximum dimension for chips (default 512)
         force_download: Force download for URLs instead of streaming (default False)
         downsample_factor: Factor to downsample image before processing (default 1.0 = no downsampling)
+        bbox: Optional bounding box (west, south, east, north) to clip the image
 
     The function ensures the returned chips are 8-bit RGB images and does not attempt
     to process images with more than 4 bands. If downsample_factor > 1.0, the image
@@ -130,20 +72,42 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
             downloaded_path = local_filename
 
         if is_tiff:
-            if force_download:
-                # Open from downloaded file
-                try:
-                    with rasterio.open(local_filename) as ds:
+            tiff_path = local_filename if force_download else input_path_or_url
+            try:
+                with rasterio.open(tiff_path) as ds:
+                    if bbox is not None:
+                        # Validate bbox input (expects WGS84 lon/lat)
+                        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+                            raise ValueError('bbox must be a list or tuple of four floats: (west, south, east, north)')
+                        west, south, east, north = bbox
+                        if west >= east or south >= north:
+                            raise ValueError('Invalid bbox coordinates: ensure west < east and south < north')
+
+                        # Transform bbox to dataset CRS if needed
+                        if ds.crs is not None and ds.crs.to_string() not in ("EPSG:4326", "CRS:84"):
+                            try:
+                                twest, tsouth, teast, tnorth = transform_bounds("EPSG:4326", ds.crs, west, south, east, north, densify_pts=21)
+                            except Exception as tbx:
+                                raise RuntimeError(f"Failed to transform bbox to dataset CRS: {tbx}")
+                        else:
+                            twest, tsouth, teast, tnorth = west, south, east, north
+
+                        # Intersect with dataset bounds to avoid empty reads
+                        db = ds.bounds
+                        iw = max(db.left, twest)
+                        is_ = max(db.bottom, tsouth)
+                        ie = min(db.right, teast)
+                        in_ = min(db.top, tnorth)
+                        if iw >= ie or is_ >= in_:
+                            raise ValueError('Requested bbox does not intersect raster extent')
+
+                        window = rasterio.windows.from_bounds(iw, is_, ie, in_, transform=ds.transform)
+                        window = window.round_offsets().round_lengths()
+                        arr = ds.read(window=window)
+                    else:
                         arr = ds.read()
-                except Exception as e:
-                    raise RuntimeError(f"Failed to open downloaded GeoTIFF '{local_filename}': {e}")
-            else:
-                # Try to open directly from the URL
-                try:
-                    with rasterio.open(input_path_or_url) as ds:
-                        arr = ds.read()
-                except Exception as e:
-                    raise RuntimeError(f"Failed to read GeoTIFF from URL '{input_path_or_url}': {e}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to open GeoTIFF at path '{tiff_path}': {e}")
 
             
         else:

@@ -10,7 +10,10 @@ import src.run_object_detection as run_object_detection
 
 WEIGHTS = 'weights/best.pt'
 IMAGE = 'data/images/mspc-naip-lax-airport.png'
-TIFF = 'https://naipeuwest.blob.core.windows.net/naip/v002/ca/2022/ca_060cm_2022/33118/m_3311823_nw_11_060_20220511.tif'
+TIFF = 'https://naipeuwest.blob.core.windows.net/naip/v002/ca/2022/ca_060cm_2022/33118/m_3311823_nw_11_060_20220511.tif' #Long Beach Harbor
+TIFF = "https://naipeuwest.blob.core.windows.net/naip/v002/ca/2022/ca_060cm_2022/33118/m_3311805_ne_11_060_20220511.tif"  # LAX Airport
+
+BBOX = [-118.4400, 33.9250, -118.3720, 33.9600]
 
 
 def _ensure_resources_available():
