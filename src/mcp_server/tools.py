@@ -5,7 +5,7 @@ MCP tools for Object Detection.
 import logging
 import os, sys
 from pathlib import Path
-from typing import Optional, Annotated, Literal
+from typing import Optional, Annotated, Literal, List
 from pydantic import Field
 
 from mcp.server.fastmcp import FastMCP
@@ -49,13 +49,18 @@ def register_tools(mcp: FastMCP) -> None:
         the presence of airplanes at an airport, or ships at sea or in port. 
         
         Provide this tool with the signed URL of the satellite image you wish to analyze, and the object type
-        you wish to search for. The only acceptable object types are 'airplane' or 'ship'.
+        you wish to search for. The only acceptable object types are 'airplane' or 'ship'. You can optionally provide a bounding box
+        to limit the area of analysis within the image. The bounding box should be in the format [west,south,east,north] in decimal degrees.
 
         The output of this model is metadata that includes a mapping between object type and the number of objects found.
         """)
     def detect_objects(
         url: Annotated[str, Field(description="The signed URL of the image to analyze")],
-        object_type: Annotated[str, Field(description="The label for the object types to analyze")]
+        object_type: Annotated[str, Field(description="The label for the object types to analyze")],
+        bbox: Optional[Annotated[
+            List[float],
+            Field(description="Bounding box [west,south,east,north] as list of four floats (decimal degrees)")
+        ]] = None,
     ) -> DetectObjectsOutput:
         """
         Detect objects in satellite imagery 
@@ -73,9 +78,20 @@ def register_tools(mcp: FastMCP) -> None:
         # Update settings based on object type:
         downsample_factor = 6 if object_type == 'ship' else 2 #6 for ship, 2 for airplanes
 
+        # bbox already validated for length & type by pydantic annotation; ensure numeric conversion
+        if bbox is not None:
+            if not isinstance(bbox, (list, tuple)):
+                raise ValueError("BBox must be provided as a list of four numeric values: [west,south,east,north]")
+            if len(bbox) != 4:
+                raise ValueError("BBox must contain exactly four values: [west,south,east,north]")
+            try:
+                bbox = [float(v) for v in bbox]
+            except (TypeError, ValueError):
+                raise ValueError("All bbox entries must be numeric (castable to float)")
+
         # Run preprocessor
         try:
-            pre = processors.preprocess_image(url, max_side_size=512, force_download=False, downsample_factor=downsample_factor)
+            pre = processors.preprocess_image(url, max_side_size=512, force_download=False, downsample_factor=downsample_factor, bbox=bbox)
         except Exception as e:
             logger.error(f"Preprocessing failed: {e}")
             raise RuntimeError(f"Preprocessing failed: {e}") from e
@@ -102,11 +118,7 @@ def register_tools(mcp: FastMCP) -> None:
         logger.info(f"Post-processed detections (after NMS): {len(aggregated)} entries")
 
         # Count objects by type
-        num_objects = 0
-        for det in aggregated:
-            label = det.get('name')
-            if label in object_type:
-                num_objects += 1
+        num_objects = sum(1 for det in aggregated if det.get('name') == object_type)
         found_objects = {object_type: num_objects}
         logger.info(f"Detected objects: {found_objects}")
         
