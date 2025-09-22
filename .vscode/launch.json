@@ -52,7 +52,10 @@
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "args": [],
-      "justMyCode": true
+      "justMyCode": true,
+      "env": {
+        "MCP_API_KEY": "7A-M7wZIuNcpPWYAPVv4fkHRC9d0MbNHoakFYmsirE8"
+      }
 
     },
     {

@@ -14,6 +14,8 @@ TIFF = 'https://naipeuwest.blob.core.windows.net/naip/v002/ca/2022/ca_060cm_2022
 TIFF = "https://naipeuwest.blob.core.windows.net/naip/v002/ca/2022/ca_060cm_2022/33118/m_3311805_ne_11_060_20220511.tif"  # LAX Airport
 
 BBOX = [-118.4400, 33.9250, -118.3720, 33.9600]
+BBOX = [-118.413734,33.938019,-118.394980,33.948700]  # Smaller box around LAX
+BBOX = [-118.251057,33.724413,-118.193378,33.758759]  # Box around Long Beach Harbor
 
 
 def _ensure_resources_available():

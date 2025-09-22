@@ -76,17 +76,19 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
             try:
                 with rasterio.open(tiff_path) as ds:
                     if bbox is not None:
+                        print("Clipping to bbox:", bbox)
                         # Validate bbox input (expects WGS84 lon/lat)
                         if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
                             raise ValueError('bbox must be a list or tuple of four floats: (west, south, east, north)')
                         west, south, east, north = bbox
                         if west >= east or south >= north:
                             raise ValueError('Invalid bbox coordinates: ensure west < east and south < north')
-
+                        print("\tTransforming bbox to dataset CRS if needed")
                         # Transform bbox to dataset CRS if needed
                         if ds.crs is not None and ds.crs.to_string() not in ("EPSG:4326", "CRS:84"):
                             try:
                                 twest, tsouth, teast, tnorth = transform_bounds("EPSG:4326", ds.crs, west, south, east, north, densify_pts=21)
+                                print(f"\tTransformed bbox to dataset CRS {ds.crs.to_string()}: {twest, tsouth, teast, tnorth}")
                             except Exception as tbx:
                                 raise RuntimeError(f"Failed to transform bbox to dataset CRS: {tbx}")
                         else:
@@ -98,13 +100,17 @@ def preprocess_image(input_path_or_url: str, max_side_size: int = 512, force_dow
                         is_ = max(db.bottom, tsouth)
                         ie = min(db.right, teast)
                         in_ = min(db.top, tnorth)
+                        print(f"Intersected bbox with dataset bounds {db}: {iw, is_, ie, in_}")
                         if iw >= ie or is_ >= in_:
                             raise ValueError('Requested bbox does not intersect raster extent')
 
                         window = rasterio.windows.from_bounds(iw, is_, ie, in_, transform=ds.transform)
                         window = window.round_offsets().round_lengths()
+                        print("Reading window from TIFF")
                         arr = ds.read(window=window)
+                        print(f"\tRead window with output shape {arr.shape}")
                     else:
+                        print("Reading full TIFF image")
                         arr = ds.read()
             except Exception as e:
                 raise RuntimeError(f"Failed to open GeoTIFF at path '{tiff_path}': {e}")

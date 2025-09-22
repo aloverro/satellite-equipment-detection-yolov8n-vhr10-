@@ -57,10 +57,10 @@ def register_tools(mcp: FastMCP) -> None:
     def detect_objects(
         url: Annotated[str, Field(description="The signed URL of the image to analyze")],
         object_type: Annotated[str, Field(description="The label for the object types to analyze")],
-        bbox: Optional[Annotated[
+        bbox_input: Annotated[
             List[float],
             Field(description="Bounding box [west,south,east,north] as list of four floats (decimal degrees)")
-        ]] = None,
+        ]
     ) -> DetectObjectsOutput:
         """
         Detect objects in satellite imagery 
@@ -77,15 +77,15 @@ def register_tools(mcp: FastMCP) -> None:
 
         # Update settings based on object type:
         downsample_factor = 6 if object_type == 'ship' else 2 #6 for ship, 2 for airplanes
-
+        bbox = None
         # bbox already validated for length & type by pydantic annotation; ensure numeric conversion
-        if bbox is not None:
-            if not isinstance(bbox, (list, tuple)):
+        if bbox_input is not None:
+            if not isinstance(bbox_input, (list, tuple)):
                 raise ValueError("BBox must be provided as a list of four numeric values: [west,south,east,north]")
-            if len(bbox) != 4:
+            if len(bbox_input) != 4:
                 raise ValueError("BBox must contain exactly four values: [west,south,east,north]")
             try:
-                bbox = [float(v) for v in bbox]
+                bbox = [float(v) for v in bbox_input]
             except (TypeError, ValueError):
                 raise ValueError("All bbox entries must be numeric (castable to float)")
 
